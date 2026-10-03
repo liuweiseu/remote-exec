@@ -1,0 +1,22 @@
+# remote-exec-server configuration (used with `remote-exec-server --config FILE`).
+# Every key is the long form of a CLI option; CLI options override this file.
+
+host: 0.0.0.0          # or e.g. the Tailscale/WireGuard address only
+port: 50051
+# listen: 0.0.0.0:50051  # alternative to host + port
+
+# Authentication is mandatory on non-loopback addresses.
+token_file: /etc/remote-exec/token     # owned by the service user, mode 600
+
+# Optional TLS; adding tls_client_ca enables mutual TLS.
+# tls_cert: /etc/remote-exec/server.pem
+# tls_key: /etc/remote-exec/server.key
+# tls_client_ca: /etc/remote-exec/ca.pem
+
+shell: /bin/bash
+max_concurrent: 32
+# max_timeout: 86400   # cap every command at 24h
+kill_grace: 5
+
+log_level: INFO
+# log_file: /var/log/remote-exec/server.log   # journald already captures stderr

@@ -1,0 +1,36 @@
+# remote-exec client configuration.
+# Default location: ~/.config/remote-exec/config.yaml
+#   (or $XDG_CONFIG_HOME/remote-exec/config.yaml, or $REMOTE_EXEC_CONFIG,
+#    or `remote-exec-client --config FILE`)
+
+# Merged into every server entry below (entries may override).
+defaults:
+  # Shared bearer token; must match the server's --token-file. chmod 600!
+  token_file: ~/.config/remote-exec/token
+  # connect_timeout: 10
+
+servers:
+  local:
+    host: 127.0.0.1
+    description: this machine (testing)
+
+  acme2:
+    host: acme2.example.local
+    port: 50051
+    description: general purpose build box
+
+  gpu01:
+    host: gpu01.example.local
+    # port omitted -> 50051
+    description: GPU computation (CUDA, nvidia-smi, Python)
+
+  fpga01:
+    host: fpga01.example.local
+    port: 50052
+    description: FPGA development (Vivado, Questa)
+    # TLS / mTLS (server started with --tls-cert/--tls-key[/--tls-client-ca]):
+    # tls: true
+    # ca_cert: ~/.config/remote-exec/ca.pem
+    # client_cert: ~/.config/remote-exec/client.pem
+    # client_key: ~/.config/remote-exec/client.key
+    # tls_server_name: fpga01.example.local   # if the cert name differs from host

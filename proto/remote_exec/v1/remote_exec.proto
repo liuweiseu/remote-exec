@@ -1,0 +1,96 @@
+// Remote command execution API.
+//
+// Design notes:
+// * Execute is a server-streaming RPC: the server emits exactly one Started
+//   event (unless the process could not be spawned), any number of stdout /
+//   stderr chunks in the order they were read, and exactly one Finished event
+//   as the final message.
+// * Output is raw bytes, not lines: tools print progress bars without newlines
+//   and may emit non UTF-8 data. The client writes bytes through unchanged.
+// * Request problems (empty command, malformed env names, auth) are reported
+//   as gRPC status codes. Anything that happens once the request has been
+//   accepted (spawn failure, timeout, exit code) is reported in Finished.
+// * Cancelling the RPC (client Ctrl-C, disconnect) terminates the whole
+//   process group of the command on the server.
+// * Future RPCs (Submit/GetStatus/GetResult/Cancel, Upload/Download/Stat/List)
+//   are intended to be added to this service or sibling services in the same
+//   package without changing the messages below.
+
+syntax = "proto3";
+
+package remote_exec.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service RemoteExecutor {
+  // Run a command and stream its output until it finishes.
+  rpc Execute(ExecuteRequest) returns (stream ExecuteEvent);
+
+  // Lightweight health / identity check.
+  rpc GetServerInfo(GetServerInfoRequest) returns (ServerInfo);
+}
+
+message ExecuteRequest {
+  // Shell command line, run as `<shell> -c <command>` on the server.
+  string command = 1;
+  // Working directory; empty means the server's default (its own cwd).
+  string working_directory = 2;
+  // Extra environment variables, merged over the server's environment.
+  map<string, string> environment = 3;
+  // Wall-clock limit in seconds; 0 means no limit (subject to the
+  // server's --max-timeout, if configured).
+  double timeout_seconds = 4;
+}
+
+message ExecuteEvent {
+  oneof event {
+    Started started = 1;
+    OutputChunk stdout = 2;
+    OutputChunk stderr = 3;
+    Finished finished = 4;
+  }
+}
+
+message Started {
+  // Server-generated identifier, also present in the server audit log.
+  string execution_id = 1;
+  int32 pid = 2;
+  google.protobuf.Timestamp start_time = 3;
+  string hostname = 4;
+}
+
+message OutputChunk {
+  bytes data = 1;
+}
+
+message Finished {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    // Process ran to completion; see exit_code / signal.
+    EXITED = 1;
+    // Process was killed because timeout_seconds elapsed.
+    TIMEOUT = 2;
+    // Process could not be started or the server failed while running it.
+    ERROR = 3;
+  }
+  Status status = 1;
+  // Shell-style exit code: the process exit status, or 128 + signal number
+  // if it was killed by a signal. Meaningless when status == ERROR.
+  int32 exit_code = 2;
+  // Terminating signal number, 0 if the process exited normally.
+  int32 signal = 3;
+  google.protobuf.Timestamp start_time = 4;
+  google.protobuf.Timestamp end_time = 5;
+  // Human readable explanation for ERROR / TIMEOUT.
+  string message = 6;
+  string execution_id = 7;
+}
+
+message GetServerInfoRequest {}
+
+message ServerInfo {
+  string hostname = 1;
+  string version = 2;
+  string user = 3;
+  string shell = 4;
+}

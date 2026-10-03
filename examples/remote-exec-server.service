@@ -1,0 +1,57 @@
+# systemd unit for remote-exec-server.
+#
+# Install (as root), assuming the tool was installed for user "builder" with
+#   sudo -u builder uv tool install /path/to/remote-exec
+#
+#   install -m 644 remote-exec-server.service /etc/systemd/system/
+#   install -d -o builder -m 700 /etc/remote-exec
+#   install -o builder -m 600 /dev/null /etc/remote-exec/token
+#   openssl rand -hex 32 > /etc/remote-exec/token      # copy to clients
+#   systemctl daemon-reload
+#   systemctl enable --now remote-exec-server
+#   journalctl -u remote-exec-server -f                 # logs + audit trail
+
+[Unit]
+Description=remote-exec gRPC remote command execution server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Never run as root: commands execute with this user's privileges.
+User=builder
+Group=builder
+WorkingDirectory=/home/builder
+
+# Tools like Vivado/CUDA usually need their environment; either set it here
+# or source settings in the commands themselves.
+# Environment=PATH=/opt/Xilinx/Vivado/2024.1/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin
+# EnvironmentFile=-/etc/remote-exec/environment
+
+# host / port / auth / logging on the command line ...
+ExecStart=/home/builder/.local/bin/remote-exec-server \
+    --host 0.0.0.0 \
+    --port 50051 \
+    --token-file /etc/remote-exec/token \
+    --log-level INFO
+# ... or everything in a config file:
+# ExecStart=/home/builder/.local/bin/remote-exec-server --config /etc/remote-exec/server.yaml
+# Add `--log-file /var/log/remote-exec/server.log` to also log to a file
+# (stderr already goes to the journal).
+
+Restart=on-failure
+RestartSec=2
+
+# On stop: SIGTERM lets the server cancel commands and kill their process
+# groups; the default KillMode=control-group then removes anything that
+# escaped (e.g. daemons that called setsid).
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Light hardening that does not get in the way of build tools.
+NoNewPrivileges=true
+PrivateTmp=false
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
