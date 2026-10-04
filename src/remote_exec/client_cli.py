@@ -60,14 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", metavar="FILE", help="client config file")
     p.add_argument("--connect-timeout", type=float, metavar="SECONDS",
                    help="max wait for the server to accept the command (default: 10)")
-    p.add_argument("-v", "--verbose", action="store_true", help="print execution summary to stderr")
+    p.add_argument("--verbose", action="store_true", help="print execution summary to stderr")
     p.add_argument("--list", action="store_true", help="list configured servers and exit")
     p.add_argument("--ping", action="store_true", help="check that SERVER is reachable and show its info")
     p.add_argument("--install-skill", nargs="?", const=str(DEFAULT_SKILL_DIR), metavar="DIR",
                    help=f"install the '{SKILL_NAME}' Claude Code skill as DIR/{SKILL_NAME}.md "
                    f"(default DIR: {DEFAULT_SKILL_DIR}) and exit")
     p.add_argument("--force", action="store_true", help="with --install-skill: overwrite an existing, modified skill")
-    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
 

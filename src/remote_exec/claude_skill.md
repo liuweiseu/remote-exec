@@ -53,7 +53,7 @@ remote-exec-client SERVER [options] "COMMAND"
 - `--timeout SECONDS` kills the remote command **and all its child processes**
   when exceeded. Always set one, sized to the job (e.g. `120` for a quick test,
   `7200` for a full FPGA implementation run).
-- `-v` prints a summary line (host, status, exit code, duration) to stderr.
+- `--verbose` prints a summary line (host, status, exit code, duration) to stderr.
 - stdin is not forwarded: commands must be non-interactive.
 - Programs that buffer output when not on a TTY (e.g. Python) stream better
   with `-e PYTHONUNBUFFERED=1` or `python -u`.

@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     lg = p.add_argument_group("logging")
     lg.add_argument("--log-level", help="DEBUG, INFO, WARNING, ERROR (default: INFO)")
     lg.add_argument("--log-file", metavar="FILE", help="also append logs to FILE (default: stderr only)")
-    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
 

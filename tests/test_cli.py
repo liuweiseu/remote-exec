@@ -207,3 +207,23 @@ def test_server_shutdown_kills_running_commands(running_server, config_file, tmp
     assert wait_until(lambda: not pid_alive(child), 10), "remote process survived server shutdown"
     assert proc.wait(15) != 0
     assert "audit" in log and "start id=" in log
+
+
+def test_version_flags_match_pyproject():
+    import tomllib
+
+    expected = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]["version"]
+    versions = set()
+    for exe in (SERVER, CLIENT):
+        for flag in ("-v", "--version"):
+            r = subprocess.run([exe, flag], capture_output=True, timeout=30)
+            assert r.returncode == 0, r.stderr
+            prog, version = r.stdout.decode().split()
+            assert prog == Path(exe).name
+            versions.add(version)
+    assert versions == {expected}
+
+
+def test_verbose_summary(server_and_config):
+    r = client("local", "--verbose", "true", config=server_and_config)
+    assert r.returncode == 0 and b"status=exited exit_code=0" in r.stderr
