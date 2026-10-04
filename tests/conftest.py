@@ -62,6 +62,20 @@ def port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+@pytest.fixture(autouse=True, scope="session")
+def isolated_home(tmp_path_factory):
+    """Keep tests (and the servers they spawn) away from the real ~/.config/remote-exec,
+    e.g. a restrictive tools.yaml on the developer's machine."""
+    home = tmp_path_factory.mktemp("home")
+    mp = pytest.MonkeyPatch()
+    mp.setenv("HOME", str(home))
+    mp.delenv("XDG_CONFIG_HOME", raising=False)
+    mp.delenv("REMOTE_EXEC_CONFIG", raising=False)
+    mp.delenv("REMOTE_EXEC_TOKEN", raising=False)
+    yield home
+    mp.undo()
+
+
 @pytest.fixture
 async def server_factory():
     """Start in-process servers on random ports; stopped at teardown."""

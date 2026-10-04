@@ -5,7 +5,7 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from collections.abc import Mapping as _Mapping
+from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
@@ -92,13 +92,17 @@ class GetServerInfoRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class ServerInfo(_message.Message):
-    __slots__ = ("hostname", "version", "user", "shell")
+    __slots__ = ("hostname", "version", "user", "shell", "allowed_tools", "denied_tools")
     HOSTNAME_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     USER_FIELD_NUMBER: _ClassVar[int]
     SHELL_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_TOOLS_FIELD_NUMBER: _ClassVar[int]
+    DENIED_TOOLS_FIELD_NUMBER: _ClassVar[int]
     hostname: str
     version: str
     user: str
     shell: str
-    def __init__(self, hostname: _Optional[str] = ..., version: _Optional[str] = ..., user: _Optional[str] = ..., shell: _Optional[str] = ...) -> None: ...
+    allowed_tools: _containers.RepeatedScalarFieldContainer[str]
+    denied_tools: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, hostname: _Optional[str] = ..., version: _Optional[str] = ..., user: _Optional[str] = ..., shell: _Optional[str] = ..., allowed_tools: _Optional[_Iterable[str]] = ..., denied_tools: _Optional[_Iterable[str]] = ...) -> None: ...

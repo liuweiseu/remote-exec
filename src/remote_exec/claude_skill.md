@@ -17,8 +17,12 @@ If this was invoked with arguments, the request is: $ARGUMENTS
 
 ```bash
 remote-exec-client --list            # NAME  HOST:PORT  description (tools/resources)
-remote-exec-client SERVER --ping     # reachable? shows remote hostname and user
+remote-exec-client SERVER --ping     # reachable? remote host/user, allowed and denied programs
 ```
+
+Each server may restrict which programs commands can run (its `tools.yaml`).
+`--ping` shows the allowed and denied program lists; by default everything
+except `ssh` is allowed. Plan commands that only use allowed programs.
 
 Pick the server whose description lists the tool or resource you need. If
 none fits or the description is unclear, check with a harmless probe such as
@@ -77,6 +81,7 @@ remote-exec-client gpu01 --cwd '~/ml' -e PYTHONUNBUFFERED=1 --timeout 600 \
 | `0` | remote command succeeded |
 | other `1..123`, `125..127` | remote command failed with that status; `127` = command not found on that server (wrong server or PATH) |
 | `124` | `--timeout` exceeded; the remote process tree was killed. Output so far was printed. Increase the timeout only if the job was making progress |
+| `126` | the server's tools policy blocked a program in the command; nothing was run. The message names the program |
 | `128+N` | remote command killed by signal N (`137` = SIGKILL, often out of memory) |
 | `130` / `143` | the client itself was interrupted; the remote command was cancelled |
 | `255` | remote-exec problem, not the command: unreachable server, authentication failure, bad config, invalid `--cwd`. Read the message on stderr |
@@ -105,5 +110,9 @@ all other output comes from the remote command.
   hardware) unless the user explicitly asked for exactly that. When in doubt,
   ask first.
 - Inspect before changing anything (`ls`, `cat`, `git status`).
+- If a command is blocked by the server's tools policy (exit `126`), do not
+  try to work around it (wrappers, scripts, `python -c`, variables). The
+  restriction is deliberate: use an allowed alternative or ask the user. Do not
+  `ssh` from a remote server to other machines.
 - Never put secrets (tokens, license keys, passwords) in commands or `-e`
   values: command lines are recorded in the server's audit log.

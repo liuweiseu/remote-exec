@@ -179,3 +179,7 @@ def test_example_configs_are_valid():
     assert cfg.resolve("fpga01").port == 50052
     server = load_server_config(EXAMPLES / "server.yaml")
     assert server["port"] == 50051
+    from remote_exec.policy import ToolPolicy, load_policy
+
+    tools = load_policy(EXAMPLES / "tools.yaml")
+    assert (tools.allow, tools.deny) == (ToolPolicy().allow, ToolPolicy().deny)

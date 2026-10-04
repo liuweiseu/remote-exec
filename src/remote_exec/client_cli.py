@@ -12,6 +12,8 @@ from . import __version__
 from .client import (
     EXIT_CLIENT_ERROR,
     EXIT_INTERRUPTED,
+    EXIT_REJECTED,
+    CommandRejected,
     RemoteExecClient,
     RemoteExecError,
     ServerUnavailable,
@@ -26,6 +28,8 @@ EPILOG = f"""\
 exit status:
   N     the remote command's exit status (128+N if killed by signal N)
   124   the command timed out (--timeout)
+  126   the server's tools policy does not allow a program in the command
+        (see the allow/deny lists shown by --ping)
   130   interrupted locally (Ctrl-C); the remote command is terminated
   255   remote-exec error: config, connection, authentication, or the command
         could not be started (message on stderr)
@@ -130,6 +134,8 @@ def list_servers(config: ClientConfig) -> int:
 async def _ping(client: RemoteExecClient) -> int:
     info = await client.server_info()
     print(f"{client.endpoint.name}: ok host={info.hostname} user={info.user} version={info.version} shell={info.shell}")
+    print(f"  allowed programs: {', '.join(info.allowed_tools) or '(none)'}")
+    print(f"  denied programs:  {', '.join(info.denied_tools) or '(none)'}")
     return 0
 
 
@@ -201,6 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             hint = f" ('{args.server}' is not a configured server name; config: {config.path or default_client_config_path()})"
         err(f"error: {exc}{hint}")
         return EXIT_CLIENT_ERROR
+    except CommandRejected as exc:
+        err(f"error: {exc}")
+        return EXIT_REJECTED
     except (RemoteExecError, SecurityError) as exc:
         err(f"error: {exc}")
         return EXIT_CLIENT_ERROR

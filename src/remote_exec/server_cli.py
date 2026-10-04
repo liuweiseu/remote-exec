@@ -11,6 +11,7 @@ import sys
 
 from . import __version__
 from .config import DEFAULT_HOST, DEFAULT_PORT, ConfigError, load_server_config, split_host_port, validate_port
+from .policy import DEFAULT_TOOLS_FILE, PolicyError, PolicyProvider
 from .security import DEFAULT_TOKEN_FILE, SecurityError, generate_token_file, is_loopback_host, read_secret_file
 from .server import ServerSettings, serve
 
@@ -32,6 +33,7 @@ DEFAULTS = {
     "insecure_no_auth": False,
     "allow_root": False,
     "listen": None,
+    "tools": None,
 }
 
 
@@ -64,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="with --generate-token: replace an existing token file")
 
     ex = p.add_argument_group("execution")
+    ex.add_argument("--tools", metavar="FILE",
+                    help=f"tools.yaml with allowed/denied programs (default: {DEFAULT_TOOLS_FILE} if it exists, "
+                    "else allow everything except ssh); reloaded automatically when changed")
     ex.add_argument("--shell", help="shell used as '<shell> -c <command>' (default: /bin/bash, else /bin/sh)")
     ex.add_argument("--max-concurrent", type=int, help="max concurrently running commands (default: 32)")
     ex.add_argument("--max-timeout", type=float, metavar="SECONDS",
@@ -104,6 +109,7 @@ def resolve_settings(args: argparse.Namespace) -> tuple[ServerSettings, dict]:
         max_concurrent=int(opts["max_concurrent"]), max_timeout=opts["max_timeout"],
         kill_grace=float(opts["kill_grace"]), token=token,
         tls_cert=opts["tls_cert"], tls_key=opts["tls_key"], tls_client_ca=opts["tls_client_ca"],
+        tools_file=opts["tools"], tools_required=bool(opts["tools"]),
     )
     return settings, opts
 
@@ -172,7 +178,8 @@ def main(argv: list[str] | None = None) -> int:
         settings, opts = resolve_settings(args)
         setup_logging(opts["log_level"], opts["log_file"])
         check_safety(settings, opts)
-    except (ConfigError, SecurityError, OSError) as exc:
+        PolicyProvider(settings.tools_file, required=settings.tools_required)  # validate tools.yaml early
+    except (ConfigError, SecurityError, PolicyError, OSError) as exc:
         print(f"remote-exec-server: error: {exc}", file=sys.stderr)
         return 2
     try:

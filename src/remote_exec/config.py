@@ -181,7 +181,7 @@ def load_client_config(path: str | os.PathLike | None = None) -> ClientConfig:
 SERVER_CONFIG_KEYS = {
     "host", "port", "listen", "token_file", "tls_cert", "tls_key", "tls_client_ca",
     "max_concurrent", "max_timeout", "shell", "kill_grace", "log_level", "log_file",
-    "insecure_no_auth", "allow_root",
+    "insecure_no_auth", "allow_root", "tools",
 }
 
 

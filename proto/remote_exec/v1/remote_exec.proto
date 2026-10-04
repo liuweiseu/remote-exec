@@ -7,8 +7,8 @@
 //   as the final message.
 // * Output is raw bytes, not lines: tools print progress bars without newlines
 //   and may emit non UTF-8 data. The client writes bytes through unchanged.
-// * Request problems (empty command, malformed env names, auth) are reported
-//   as gRPC status codes. Anything that happens once the request has been
+// * Request problems (empty command, malformed env names, auth, a program
+//   forbidden by the server's tools policy) are reported as gRPC status codes. Anything that happens once the request has been
 //   accepted (spawn failure, timeout, exit code) is reported in Finished.
 // * Cancelling the RPC (client Ctrl-C, disconnect) terminates the whole
 //   process group of the command on the server.
@@ -93,4 +93,9 @@ message ServerInfo {
   string version = 2;
   string user = 3;
   string shell = 4;
+  // Program patterns from the server's tools policy (tools.yaml); a command
+  // running a program matched by denied_tools, or not matched by
+  // allowed_tools, is rejected with PERMISSION_DENIED.
+  repeated string allowed_tools = 5;
+  repeated string denied_tools = 6;
 }

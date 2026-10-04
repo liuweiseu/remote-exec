@@ -25,6 +25,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from . import __version__
 from .config import DEFAULT_HOST, DEFAULT_PORT, format_address
 from .executor import CommandSpec, Executor, Finished, Output, Started, Status, Stream
+from .policy import PolicyProvider
 from .security import TokenAuthInterceptor, peer_identity, server_credentials
 from .v1 import remote_exec_pb2 as pb
 from .v1 import remote_exec_pb2_grpc as pb_grpc
@@ -64,6 +65,8 @@ class ServerSettings:
     tls_cert: str | None = None
     tls_key: str | None = None
     tls_client_ca: str | None = None
+    tools_file: str | None = None      # None: default ~/.config/remote-exec/tools.yaml if present
+    tools_required: bool = False       # error if tools_file is missing (explicit --tools)
 
     @property
     def address(self) -> str:
@@ -144,9 +147,10 @@ def _q(value: str) -> str:
 
 
 class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
-    def __init__(self, settings: ServerSettings, executor: Executor):
+    def __init__(self, settings: ServerSettings, executor: Executor, policy: PolicyProvider):
         self.settings = settings
         self.executor = executor
+        self.policy = policy
         self.hostname = socket.gethostname()
         self._active = 0
 
@@ -157,6 +161,11 @@ class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
         except RequestError as exc:
             audit.warning("rejected client=%s reason=%s", client, _q(str(exc)))
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+
+        if reason := self.policy.current().check(spec.command):
+            audit.warning("rejected client=%s reason=%s command=%s", client, _q(f"tools policy: {reason}"),
+                          _q(spec.command))
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, f"blocked by the server's tools policy: {reason}")
 
         if self._active >= self.settings.max_concurrent:
             audit.warning("rejected client=%s reason=%s", client, _q("too many concurrent commands"))
@@ -192,8 +201,10 @@ class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
             )
 
     async def GetServerInfo(self, request, context):
+        policy = self.policy.current()
         return pb.ServerInfo(
             hostname=self.hostname, version=__version__, user=getpass.getuser(), shell=self.executor.shell,
+            allowed_tools=policy.allow, denied_tools=policy.deny,
         )
 
 
@@ -203,10 +214,11 @@ class RemoteExecServer:
     def __init__(self, settings: ServerSettings):
         self.settings = settings
         self.executor = Executor(shell=settings.shell or default_shell(), kill_grace=settings.kill_grace)
+        self.policy = PolicyProvider(settings.tools_file, required=settings.tools_required)
         interceptors = [TokenAuthInterceptor(settings.token)] if settings.token else []
         self._server = grpc.aio.server(interceptors=interceptors, options=SERVER_OPTIONS)
         pb_grpc.add_RemoteExecutorServicer_to_server(
-            RemoteExecutorService(settings, self.executor), self._server
+            RemoteExecutorService(settings, self.executor, self.policy), self._server
         )
         self.bound_port: int | None = None
 
@@ -226,6 +238,7 @@ class RemoteExecServer:
             __version__, format_address(s.host, port), bool(s.tls_cert), bool(s.tls_client_ca),
             bool(s.token), self.executor.shell,
         )
+        log.info("tools policy: %s", self.policy.current().describe())
         return port
 
     async def stop(self, grace: float = 5.0) -> None:

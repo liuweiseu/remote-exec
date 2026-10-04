@@ -51,6 +51,7 @@ src/remote_exec/
     client_cli.py       remote-exec-client 入口
     config.py           client/server 配置加载
     security.py         token 认证拦截器、TLS 凭据
+    policy.py           tools.yaml 的 allow/deny 策略与命令解析
     skill.py            --install-skill 的实现
     claude_skill.md     Claude Code skill 文本（由 --install-skill 安装）
 tests/                  单元测试 + localhost 集成测试
@@ -154,6 +155,32 @@ remote-exec-server --config /etc/remote-exec/server.yaml
 `--kill-grace`（5 秒）、`--log-level`、`--log-file`。详见 `remote-exec-server --help` 和
 [examples/server.yaml](examples/server.yaml)。
 
+### 允许运行的程序（`tools.yaml`）
+
+server 上的 `~/.config/remote-exec/tools.yaml` 定义了命令允许和不允许运行的程序。也可以用
+`--tools FILE` 或 server 配置中的 `tools:` 指定其他路径。示例见 [examples/tools.yaml](examples/tools.yaml)。
+
+```yaml
+allow: ["*"]        # "*" 表示所有程序；支持 "python*" 这类通配符
+deny: [ssh]         # 同一程序在两个列表中都匹配时，deny 优先
+```
+
+- **默认值：** 没有该文件，或缺少某个键时，server 使用 `allow: ["*"]`、`deny: ["ssh"]`，
+  即允许除 `ssh` 以外的所有程序。写 `deny: []` 表示不禁止任何程序。
+- **检查范围：** 命令行会启动的每一个程序，包括 `|`、`&&`、`;` 和换行分隔的每一部分、
+  `$(...)` 和反引号、`sudo`/`env`/`timeout`/`nohup` 等包装命令，以及传给 `bash -c` / `eval`
+  的脚本。因此 `ssh h`、`/usr/bin/ssh h`、`make && ssh h`、`echo $(ssh h)`、`bash -c "ssh h"`
+  都会被拒绝；`echo ssh`、`grep ssh log` 不会，因为其中的 `ssh` 只是参数。
+- **匹配规则：** 不含 `/` 的模式匹配程序的文件名，含 `/` 的模式匹配命令中写出的路径。
+  shell 内置命令（`cd`、`echo`、`export`、`test` 等）不需要出现在 `allow` 中。
+- **被拒绝时：** 命令不会被执行。client 以 **126** 退出并打印原因，审计日志也会记录。
+  `remote-exec-client SERVER --ping` 可以查看当前生效的规则。
+- **修改生效：** 修改文件后对下一条命令立即生效，不需要重启。启动时文件无效会直接报错；
+  运行中改坏了文件时，继续使用上一份有效的规则，并记录错误日志。
+- **局限：** 这是防止误操作的护栏（例如防止 Agent 跳到其他机器上），**不是沙箱**。
+  间接启动的程序（脚本内部、`python -c`、`X=ssh; $X`）无法被识别。需要硬性限制时，
+  请使用操作系统层面的手段（服务用户的权限、防火墙规则等）。
+
 ## 8. Server 端口配置
 
 默认端口为 **50051**。可以通过以下任意方式修改：
@@ -218,6 +245,7 @@ remote-exec-client gpu01 --timeout 60 -- ls -la /data   # 未加引号的多个�
 | N      | 远程命令的退出码（`false` → 1，命令不存在 → 127） |
 | 128+N  | 远程命令被信号 N 终止 |
 | 124    | 超时（与 coreutils `timeout` 一致） |
+| 126    | 被 server 的 tools 策略（`tools.yaml`）拒绝 |
 | 130 / 143 | client 被 SIGINT / SIGTERM 中断；远程命令已被取消 |
 | 255    | remote-exec 自身错误（与 ssh 一致）：无法连接、认证失败、配置错误、cwd 无效 |
 
@@ -276,6 +304,8 @@ journalctl -u remote-exec-server -f
   - *mTLS*（局域网推荐）：server 端再加上 `--tls-client-ca`，client 端配置
     `client_cert`/`client_key`。client 证书的 CN 会出现在审计日志中。
 - 使用专用的非特权用户运行；默认拒绝 root。限制该用户的访问权限（用户组、文件权限、sudo）。
+- 用 `tools.yaml` 限制命令可以运行的程序（见 §7）。默认禁止 `ssh`，防止命令跳转到其他机器。
+  它是护栏，不是沙箱。
 - **审计日志**（`remote_exec.audit` logger）：每条命令记录一条 `start`（id、client、cwd、超时、
   环境变量*名称*、命令）和一条 `end`（状态、退出码、耗时）。**永远不会记录环境变量的值**。
   命令行会被记录，因此不要把密钥写在命令里。
@@ -331,6 +361,7 @@ uv run pytest            # 约 20 秒
 - `tests/test_config.py`：配置解析、默认/自定义端口、server 选项优先级、安全检查。
 - `tests/test_skill.py`：`--install-skill`（默认/自定义目录、更新、`--force`）。
 - `tests/test_token.py`：`--generate-token`（文件权限、随机性、`--force`、生成的 token 可通过认证）。
+- `tests/test_policy.py`：`tools.yaml`（命令解析、deny 优先、通配符、默认值、自动重新加载、拦截、退出码 126）。
 
 ## 16. 未来扩展
 

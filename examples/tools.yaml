@@ -1,0 +1,34 @@
+# remote-exec-server tools policy.
+# Default location: ~/.config/remote-exec/tools.yaml of the server user
+# (or `remote-exec-server --tools FILE`, or `tools:` in server.yaml).
+# Changes are picked up automatically; no restart needed.
+#
+# Every program a command would start is checked: each part of pipelines and
+# lists (|, &&, ;), $(...) and `...`, wrappers like sudo/env/timeout, and
+# scripts given to bash -c / eval. Patterns match the program name
+# ("ssh" also matches /usr/bin/ssh); globs are allowed ("python*");
+# a pattern containing "/" matches the path as written.
+#
+# Rules:
+#   - "*" matches every program.
+#   - deny wins over allow.
+#   - shell builtins (cd, echo, export, test, ...) never need to be allowed.
+#   - a missing key uses its default: allow ["*"], deny ["ssh"].
+#     Use "deny: []" to deny nothing.
+#
+# This is a guardrail against mistakes, not a sandbox: programs started
+# indirectly (from a script, python -c, a variable) are not visible.
+
+allow:
+  - "*"
+
+deny:
+  - ssh
+  # - scp
+  # - sudo
+  # - shutdown
+  # - reboot
+
+# Example of a strict allow list for an FPGA build server:
+# allow: [vivado, vsim, vlog, vcom, make, python3, git, ls, cat, tail, grep]
+# deny: [ssh]

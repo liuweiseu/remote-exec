@@ -53,6 +53,7 @@ src/remote_exec/
     client_cli.py       remote-exec-client entry point
     config.py           client/server config loading
     security.py         token auth interceptor, TLS credentials
+    policy.py           tools.yaml allow/deny policy and command analysis
     skill.py            --install-skill implementation
     claude_skill.md     Claude Code skill text (installed by --install-skill)
 tests/                  unit + localhost integration tests
@@ -166,6 +167,40 @@ Other options: `--shell` (default `/bin/bash`), `--max-concurrent` (32),
 `--max-timeout`, `--kill-grace` (5s), `--log-level`, `--log-file`. See
 `remote-exec-server --help` and [examples/server.yaml](examples/server.yaml).
 
+### Allowed programs (`tools.yaml`)
+
+`~/.config/remote-exec/tools.yaml` on the server lists the programs that
+commands may and may not run. Use `--tools FILE` or `tools:` in the server
+config to load it from elsewhere. See [examples/tools.yaml](examples/tools.yaml).
+
+```yaml
+allow: ["*"]        # "*" = every program; globs like "python*" work
+deny: [ssh]         # deny wins if a program matches both lists
+```
+
+- **Default:** without the file, or for a missing key, the server uses
+  `allow: ["*"]` and `deny: ["ssh"]`, so everything except `ssh` is allowed.
+  `deny: []` denies nothing.
+- **What is checked:** every program a command line would start. That covers
+  each part of `|`, `&&`, `;` and newlines, `$(...)` and backticks, wrappers
+  such as `sudo`, `env`, `timeout` and `nohup`, and scripts given to
+  `bash -c` / `eval`. So `ssh h`, `/usr/bin/ssh h`, `make && ssh h`,
+  `echo $(ssh h)` and `bash -c "ssh h"` are all rejected. `echo ssh` and
+  `grep ssh log` are not, because there `ssh` is only an argument.
+- **How patterns match:** a pattern without `/` matches the program's base
+  name; a pattern with `/` matches the path as written. Shell builtins (`cd`,
+  `echo`, `export`, `test`, ...) never need to be in `allow`.
+- **Rejections:** a rejected command is not started. The client exits with
+  **126** and prints the reason, and the audit log records it.
+  `remote-exec-client SERVER --ping` shows the active lists.
+- **Reloading:** edits take effect on the next command, with no restart. An
+  invalid file is rejected at startup; if a later edit breaks the file, the
+  previous policy stays active and an error is logged.
+- **Limits:** this is a guardrail against mistakes (e.g. an agent hopping to
+  other machines), **not a sandbox**. Programs started indirectly, such as by
+  a script, `python -c`, or `X=ssh; $X`, are invisible to it. Use OS-level
+  controls (the service user's permissions, firewall rules) for hard limits.
+
 ## 8. Server port configuration
 
 The default port is **50051**. Change it with any of:
@@ -234,6 +269,7 @@ remote-exec-client gpu01 --timeout 60 -- ls -la /data   # unquoted words joined 
 | N      | the remote command's exit status (`false` → 1, command not found → 127) |
 | 128+N  | remote command killed by signal N |
 | 124    | timeout (like coreutils `timeout`) |
+| 126    | rejected by the server's tools policy (`tools.yaml`) |
 | 130 / 143 | client interrupted by SIGINT / SIGTERM; remote command was cancelled |
 | 255    | remote-exec error (like ssh): unreachable, auth, config, invalid cwd |
 
@@ -306,6 +342,9 @@ authenticate can run any command as the service user.
     appears in the audit log.
 - Run as a dedicated unprivileged user; root is refused by default. Restrict
   what that user can access (groups, file permissions, sudo).
+- Limit which programs commands may run with `tools.yaml` (see §7). By
+  default `ssh` is denied so commands cannot hop to other machines. It is a
+  guardrail, not a sandbox.
 - **Audit log** (`remote_exec.audit` logger): one `start` record (id, client,
   cwd, timeout, env variable *names*, command) and one `end` record (status,
   exit code, duration) per command. Environment variable **values are never
@@ -374,6 +413,8 @@ uv run pytest            # ~20 s
 - `tests/test_skill.py`: `--install-skill` (default/custom dir, update, `--force`).
 - `tests/test_token.py`: `--generate-token` (permissions, randomness, `--force`,
   generated token authenticates).
+- `tests/test_policy.py`: `tools.yaml` (command analysis, deny-wins, globs,
+  defaults, reload, enforcement, exit 126).
 
 ## 16. Future extensions
 

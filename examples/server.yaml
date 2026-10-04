@@ -20,3 +20,7 @@ kill_grace: 5
 
 log_level: INFO
 # log_file: /var/log/remote-exec/server.log   # journald already captures stderr
+
+# Allowed/denied programs (default: ~/.config/remote-exec/tools.yaml if present,
+# otherwise everything except ssh). See examples/tools.yaml.
+# tools: /etc/remote-exec/tools.yaml

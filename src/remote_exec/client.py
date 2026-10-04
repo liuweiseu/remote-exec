@@ -26,6 +26,7 @@ DEFAULT_CONNECT_TIMEOUT = 10.0
 
 # Shell/ssh-like exit codes for outcomes that are not a remote exit status.
 EXIT_TIMEOUT = 124      # same as coreutils `timeout`
+EXIT_REJECTED = 126     # same as the shell's "cannot execute": blocked by the server's tools policy
 EXIT_INTERRUPTED = 130  # 128 + SIGINT
 EXIT_CLIENT_ERROR = 255  # same as ssh: connection/auth/protocol failure
 
@@ -44,6 +45,10 @@ class RemoteExecError(Exception):
 
 class ServerUnavailable(RemoteExecError):
     pass
+
+
+class CommandRejected(RemoteExecError):
+    """The server refused to run the command (tools policy)."""
 
 
 @dataclass
@@ -100,6 +105,8 @@ def _describe_rpc_error(endpoint: ServerEndpoint, err: grpc.aio.AioRpcError) -> 
         return f"cannot reach server {where}: {details}"
     if code == grpc.StatusCode.UNAUTHENTICATED:
         return f"authentication failed for {where}: {details}"
+    if code == grpc.StatusCode.PERMISSION_DENIED:
+        return f"{where} refused to run the command: {details}"
     if code == grpc.StatusCode.INVALID_ARGUMENT:
         return f"invalid request: {details}"
     if code == grpc.StatusCode.RESOURCE_EXHAUSTED:
@@ -153,6 +160,8 @@ class RemoteExecClient:
         msg = _describe_rpc_error(self.endpoint, err)
         if err.code() in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED):
             return ServerUnavailable(msg)
+        if err.code() == grpc.StatusCode.PERMISSION_DENIED:
+            return CommandRejected(msg)
         return RemoteExecError(msg)
 
     async def execute(
