@@ -248,6 +248,60 @@ servers:
 
 `remote-exec-client --list` 列出已配置的 server，`remote-exec-client fpga01 --ping` 检查连通性。
 
+### 每台 server 使用独立的 token
+
+每台 server 各自生成自己的 token（`remote-exec-server --generate-token`）。
+在 client 上为每台 server 保存一个 token 文件，并在各自的配置中用 `token_file` 指向它：
+
+```yaml
+servers:
+  fpga01:
+    host: fpga01.example.local
+    token_file: ~/.config/remote-exec/tokens/fpga01.token
+  gpu01:
+    host: gpu01.example.local
+    token_file: ~/.config/remote-exec/tokens/gpu01.token
+```
+
+这样 `remote-exec-client fpga01 ...` 只会发送 `fpga01.token`，而且只发给 fpga01。
+每台 server 用独立的 token，某个 token 泄露时影响范围有限：只需在那一台 server 上更换，
+不影响其他 server。
+
+把每台 server 的 token 分别取回到各自的文件中，然后逐台验证：
+
+```bash
+mkdir -p ~/.config/remote-exec/tokens && chmod 700 ~/.config/remote-exec/tokens
+( umask 077   # 文件一创建就是 600 权限
+  ssh fpga01 cat ~/.config/remote-exec/token > ~/.config/remote-exec/tokens/fpga01.token
+  ssh gpu01  cat ~/.config/remote-exec/token > ~/.config/remote-exec/tokens/gpu01.token
+)
+remote-exec-client fpga01 --ping     # 报 "authentication failed" 表示 token 不一致
+remote-exec-client gpu01 --ping
+```
+
+对每台 server，client 按以下顺序取 token，找到第一个即停止：
+
+1. 该 server 配置中的 `token:`（直接写 token 字符串）
+2. 该 server 配置中的 `token_file:`
+3. `defaults:` 中的 `token` / `token_file`。server 自己的配置会覆盖 `defaults`。
+4. 环境变量 `$REMOTE_EXEC_TOKEN`
+
+因此可以混合使用：`defaults` 中放一个共用的 token，个别 server 单独覆盖：
+
+```yaml
+defaults:
+  token_file: ~/.config/remote-exec/tokens/shared.token   # gpu01 使用这个
+servers:
+  gpu01:
+    host: gpu01.example.local
+  fpga01:
+    host: fpga01.example.local
+    token_file: ~/.config/remote-exec/tokens/fpga01.token  # 覆盖 defaults
+```
+
+配置了 `token_file` 但文件不存在时，client 会以 255 退出。token 文件的权限应保持 600；
+如果文件对同组或其他用户可读，client 会打印警告。
+
 ## 10. 命令执行
 
 ```bash

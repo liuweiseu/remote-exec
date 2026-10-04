@@ -120,6 +120,10 @@ _ENDPOINT_KEYS = {f.name for f in fields(ServerEndpoint)} - {"name"}
 def _make_endpoint(name: str, raw: Any, defaults: dict, where: str) -> ServerEndpoint:
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: server entry must be a mapping")
+    if "token" in raw or "token_file" in raw:
+        # A server's own credential replaces the default one entirely; otherwise a
+        # default `token` would win over the server's `token_file`.
+        defaults = {k: v for k, v in defaults.items() if k not in ("token", "token_file")}
     merged = {**defaults, **raw}
     unknown = set(merged) - _ENDPOINT_KEYS
     if unknown:

@@ -276,6 +276,63 @@ Unknown keys are rejected so a typo can't silently disable a setting.
 `remote-exec-client --list` shows the configured servers and
 `remote-exec-client fpga01 --ping` checks connectivity.
 
+### One token per server
+
+Each server generates its own token (`remote-exec-server --generate-token`).
+On the client, keep one token file per server and point each server entry at
+its own file with `token_file`:
+
+```yaml
+servers:
+  fpga01:
+    host: fpga01.example.local
+    token_file: ~/.config/remote-exec/tokens/fpga01.token
+  gpu01:
+    host: gpu01.example.local
+    token_file: ~/.config/remote-exec/tokens/gpu01.token
+```
+
+`remote-exec-client fpga01 ...` then sends only `fpga01.token`, and only to
+fpga01. Separate tokens limit the damage if one leaks: it can be rotated on
+that server without touching the others.
+
+Fetch each server's token into its own file, then check every server:
+
+```bash
+mkdir -p ~/.config/remote-exec/tokens && chmod 700 ~/.config/remote-exec/tokens
+( umask 077   # files are created with mode 600
+  ssh fpga01 cat ~/.config/remote-exec/token > ~/.config/remote-exec/tokens/fpga01.token
+  ssh gpu01  cat ~/.config/remote-exec/token > ~/.config/remote-exec/tokens/gpu01.token
+)
+remote-exec-client fpga01 --ping     # "authentication failed" = token mismatch
+remote-exec-client gpu01 --ping
+```
+
+For each server the client takes the first token it finds, in this order:
+
+1. `token:` in that server's entry (the token string itself)
+2. `token_file:` in that server's entry
+3. `token` / `token_file` from `defaults:`. A server's own keys override
+   `defaults`.
+4. the `$REMOTE_EXEC_TOKEN` environment variable
+
+So a shared token in `defaults` and per-server exceptions can be mixed:
+
+```yaml
+defaults:
+  token_file: ~/.config/remote-exec/tokens/shared.token   # used by gpu01
+servers:
+  gpu01:
+    host: gpu01.example.local
+  fpga01:
+    host: fpga01.example.local
+    token_file: ~/.config/remote-exec/tokens/fpga01.token  # overrides defaults
+```
+
+A configured `token_file` that does not exist makes the client exit with 255.
+Keep token files at mode 600; the client warns about group/world-readable
+token files.
+
 ## 10. Command execution
 
 ```bash

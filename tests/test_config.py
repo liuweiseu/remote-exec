@@ -183,3 +183,39 @@ def test_example_configs_are_valid():
 
     tools = load_policy(EXAMPLES / "tools.yaml")
     assert (tools.allow, tools.deny) == (ToolPolicy().allow, ToolPolicy().deny)
+
+
+def test_server_token_overrides_default_token(tmp_path):
+    cfg = load_client_config(write(tmp_path, """
+defaults:
+  token: shared-secret
+servers:
+  a: {host: a.local}
+  b: {host: b.local, token_file: /etc/b.token}
+  c: {host: c.local, token: own}
+"""))
+    a, b, c = cfg.resolve("a"), cfg.resolve("b"), cfg.resolve("c")
+    assert (a.token, a.token_file) == ("shared-secret", None)
+    assert (b.token, b.token_file) == (None, "/etc/b.token")  # default token must not win
+    assert (c.token, c.token_file) == ("own", None)
+
+
+async def test_each_server_uses_its_own_token_file(server_factory, tmp_path):
+    from remote_exec.client import RemoteExecClient, RemoteExecError
+
+    (tmp_path / "a.token").write_text("token-a\n")
+    (tmp_path / "b.token").write_text("token-b\n")
+    _, ep_a = await server_factory(token="token-a")
+    _, ep_b = await server_factory(token="token-b")
+    cfg = load_client_config(write(tmp_path, f"""
+servers:
+  a: {{host: 127.0.0.1, port: {ep_a.port}, token_file: {tmp_path}/a.token}}
+  b: {{host: 127.0.0.1, port: {ep_b.port}, token_file: {tmp_path}/b.token}}
+  wrong: {{host: 127.0.0.1, port: {ep_b.port}, token_file: {tmp_path}/a.token}}
+"""))
+    for name in ("a", "b"):
+        async with RemoteExecClient(cfg.resolve(name)) as client:
+            assert (await client.run("true")).ok
+    with pytest.raises(RemoteExecError, match="authentication failed"):
+        async with RemoteExecClient(cfg.resolve("wrong")) as client:
+            await client.run("true")
