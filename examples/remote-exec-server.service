@@ -21,6 +21,7 @@ Type=simple
 # Never run as root: commands execute with this user's privileges.
 User=builder
 Group=builder
+# The command log (remote-exec-commands.log) is written here by default.
 WorkingDirectory=/home/builder
 
 # Tools like Vivado/CUDA usually need their environment; either set it here

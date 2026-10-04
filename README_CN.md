@@ -52,6 +52,7 @@ src/remote_exec/
     config.py           client/server 配置加载
     security.py         token 认证拦截器、TLS 凭据
     policy.py           tools.yaml 的 allow/deny 策略与命令解析
+    cmdlog.py           命令日志（命令与输出，按大小轮转）
     skill.py            --install-skill 的实现
     claude_skill.md     Claude Code skill 文本（由 --install-skill 安装）
 tests/                  单元测试 + localhost 集成测试
@@ -181,6 +182,30 @@ deny: [ssh]         # 同一程序在两个列表中都匹配时，deny 优先
   间接启动的程序（脚本内部、`python -c`、`X=ssh; $X`）无法被识别。需要硬性限制时，
   请使用操作系统层面的手段（服务用户的权限、防火墙规则等）。
 
+### 命令日志
+
+server 会把执行的每条命令及其输出写入 `remote-exec-commands.log`，位置是**启动 server 时所在的目录**。
+用 systemd 运行时就是 unit 中 `WorkingDirectory=` 指定的目录。每行都带执行 ID，并发执行的命令可以区分开：
+
+```
+2026-10-04 10:00:00.120 [3f2a9c1d0b7e] START client=ipv4:10.0.0.7:51234 cwd="/proj" timeout=0 env_keys="" command="make"
+2026-10-04 10:00:00.250 [3f2a9c1d0b7e] OUT| gcc -c main.c
+2026-10-04 10:00:00.260 [3f2a9c1d0b7e] ERR| warning: unused variable
+2026-10-04 10:00:01.900 [3f2a9c1d0b7e] END status=exited exit_code=0 duration=1.780s
+2026-10-04 10:00:02.010 [------------] REJECTED client=... reason="tools policy: ..." command="ssh other"
+```
+
+- **文件轮转：** 文件即将超过 **10 MB** 时，改名为 `remote-exec-commands.<YYYYmmdd-HHMMSS>.log`，
+  然后新建文件继续写。
+- **保留策略：** 默认**保留所有**存档文件。工具输出可能很大，可以用 `--command-log-keep N`
+  只保留最新的 N 个。
+- **选项：** `--command-log FILE`（改位置）、`--command-log-max-mb MB`、`--no-command-log`。
+  对应的配置项为 `command_log`、`command_log_max_mb`、`command_log_keep`、`no_command_log`。
+- **隐私：** 文件权限为 600。环境变量的值不会被记录，但命令输出会，请把这些文件当作敏感信息对待。
+- **可靠性：** 磁盘满等写入错误只会在 server 日志中报告一次，不会中断命令执行。
+- 它和审计日志（`remote_exec.audit`，输出到 stderr/journald 或 `--log-file`）是分开的，
+  审计日志只记录命令的元数据。
+
 ## 8. Server 端口配置
 
 默认端口为 **50051**。可以通过以下任意方式修改：
@@ -306,6 +331,8 @@ journalctl -u remote-exec-server -f
 - 使用专用的非特权用户运行；默认拒绝 root。限制该用户的访问权限（用户组、文件权限、sudo）。
 - 用 `tools.yaml` 限制命令可以运行的程序（见 §7）。默认禁止 `ssh`，防止命令跳转到其他机器。
   它是护栏，不是沙箱。
+- **命令日志**（`remote-exec-commands.log`，见 §7）包含完整的命令输出，文件权限为 600。
+  请限制谁能读取 server 的工作目录。
 - **审计日志**（`remote_exec.audit` logger）：每条命令记录一条 `start`（id、client、cwd、超时、
   环境变量*名称*、命令）和一条 `end`（状态、退出码、耗时）。**永远不会记录环境变量的值**。
   命令行会被记录，因此不要把密钥写在命令里。
@@ -362,6 +389,7 @@ uv run pytest            # 约 20 秒
 - `tests/test_skill.py`：`--install-skill`（默认/自定义目录、更新、`--force`）。
 - `tests/test_token.py`：`--generate-token`（文件权限、随机性、`--force`、生成的 token 可通过认证）。
 - `tests/test_policy.py`：`tools.yaml`（命令解析、deny 优先、通配符、默认值、自动重新加载、拦截、退出码 126）。
+- `tests/test_cmdlog.py`：命令日志（格式、不完整行和超长行、轮转、保留数量、文件权限、默认位置、关闭）。
 
 ## 16. 未来扩展
 

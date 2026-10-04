@@ -174,7 +174,7 @@ def test_cli_exit_126_and_ping(tmp_path):
     port = free_port()
     tools = write(tmp_path / "tools.yaml", "allow: [echo, true]\ndeny: [ssh]\n")
     srv = subprocess.Popen([SERVER, "--port", str(port), "--tools", str(tools)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=tmp_path)
     try:
         assert wait_until(lambda: port_in_use(port), 10)
         target = f"127.0.0.1:{port}"

@@ -21,6 +21,13 @@ kill_grace: 5
 log_level: INFO
 # log_file: /var/log/remote-exec/server.log   # journald already captures stderr
 
+# Command log: every command and its output. Relative paths are relative to
+# the directory the server is started from (systemd: WorkingDirectory=).
+command_log: remote-exec-commands.log
+command_log_max_mb: 10     # start a new file beyond this size
+command_log_keep: 0        # rotated files to keep; 0 = all
+# no_command_log: true
+
 # Allowed/denied programs (default: ~/.config/remote-exec/tools.yaml if present,
 # otherwise everything except ssh). See examples/tools.yaml.
 # tools: /etc/remote-exec/tools.yaml

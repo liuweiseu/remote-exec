@@ -54,6 +54,7 @@ src/remote_exec/
     config.py           client/server config loading
     security.py         token auth interceptor, TLS credentials
     policy.py           tools.yaml allow/deny policy and command analysis
+    cmdlog.py           command log (commands + output, size-based rotation)
     skill.py            --install-skill implementation
     claude_skill.md     Claude Code skill text (installed by --install-skill)
 tests/                  unit + localhost integration tests
@@ -201,6 +202,36 @@ deny: [ssh]         # deny wins if a program matches both lists
   a script, `python -c`, or `X=ssh; $X`, are invisible to it. Use OS-level
   controls (the service user's permissions, firewall rules) for hard limits.
 
+### Command log
+
+The server writes every command it runs, together with its output, to
+`remote-exec-commands.log` in **the directory it was started from**. Under
+systemd that is the unit's `WorkingDirectory=`. Each line carries the
+execution id, so concurrent commands can be told apart:
+
+```
+2026-10-04 10:00:00.120 [3f2a9c1d0b7e] START client=ipv4:10.0.0.7:51234 cwd="/proj" timeout=0 env_keys="" command="make"
+2026-10-04 10:00:00.250 [3f2a9c1d0b7e] OUT| gcc -c main.c
+2026-10-04 10:00:00.260 [3f2a9c1d0b7e] ERR| warning: unused variable
+2026-10-04 10:00:01.900 [3f2a9c1d0b7e] END status=exited exit_code=0 duration=1.780s
+2026-10-04 10:00:02.010 [------------] REJECTED client=... reason="tools policy: ..." command="ssh other"
+```
+
+- **Rotation:** when the file would exceed **10 MB**, it is renamed to
+  `remote-exec-commands.<YYYYmmdd-HHMMSS>.log` and a new file is started.
+- **Retention:** rotated files are **all kept** by default; use
+  `--command-log-keep N` to keep only the newest N, since long tool output can
+  add up quickly.
+- **Options:** `--command-log FILE` (another location), `--command-log-max-mb MB`
+  and `--no-command-log`. The config keys are `command_log`,
+  `command_log_max_mb`, `command_log_keep` and `no_command_log`.
+- **Privacy:** files are created with mode 600. Environment variable values
+  are not logged, but command output is, so treat the files as sensitive.
+- **Reliability:** a full disk or other write error is reported once in the
+  server log and never interrupts commands.
+- This is separate from the audit log (`remote_exec.audit`, stderr/journald
+  or `--log-file`), which records only command metadata.
+
 ## 8. Server port configuration
 
 The default port is **50051**. Change it with any of:
@@ -345,6 +376,9 @@ authenticate can run any command as the service user.
 - Limit which programs commands may run with `tools.yaml` (see §7). By
   default `ssh` is denied so commands cannot hop to other machines. It is a
   guardrail, not a sandbox.
+- **Command log** (`remote-exec-commands.log`, see §7) contains full command
+  output. It is created with mode 600; restrict who can read the server's
+  working directory.
 - **Audit log** (`remote_exec.audit` logger): one `start` record (id, client,
   cwd, timeout, env variable *names*, command) and one `end` record (status,
   exit code, duration) per command. Environment variable **values are never
@@ -415,6 +449,8 @@ uv run pytest            # ~20 s
   generated token authenticates).
 - `tests/test_policy.py`: `tools.yaml` (command analysis, deny-wins, globs,
   defaults, reload, enforcement, exit 126).
+- `tests/test_cmdlog.py`: command log (format, partial/long lines, rotation,
+  retention, permissions, default location, disabling).
 
 ## 16. Future extensions
 

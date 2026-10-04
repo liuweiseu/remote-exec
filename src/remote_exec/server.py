@@ -24,6 +24,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 from . import __version__
 from .config import DEFAULT_HOST, DEFAULT_PORT, format_address
+from .cmdlog import CommandLog
 from .executor import CommandSpec, Executor, Finished, Output, Started, Status, Stream
 from .policy import PolicyProvider
 from .security import TokenAuthInterceptor, peer_identity, server_credentials
@@ -67,6 +68,9 @@ class ServerSettings:
     tls_client_ca: str | None = None
     tools_file: str | None = None      # None: default ~/.config/remote-exec/tools.yaml if present
     tools_required: bool = False       # error if tools_file is missing (explicit --tools)
+    command_log: str | None = None     # file recording commands and their output; None = off
+    command_log_max_mb: float = 10.0   # rotate to a new file beyond this size
+    command_log_keep: int = 0          # rotated files to keep; 0 = all
 
     @property
     def address(self) -> str:
@@ -147,10 +151,12 @@ def _q(value: str) -> str:
 
 
 class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
-    def __init__(self, settings: ServerSettings, executor: Executor, policy: PolicyProvider):
+    def __init__(self, settings: ServerSettings, executor: Executor, policy: PolicyProvider,
+                 command_log: CommandLog | None = None):
         self.settings = settings
         self.executor = executor
         self.policy = policy
+        self.command_log = command_log
         self.hostname = socket.gethostname()
         self._active = 0
 
@@ -160,15 +166,21 @@ class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
             spec = validate_request(request, self.settings.max_timeout)
         except RequestError as exc:
             audit.warning("rejected client=%s reason=%s", client, _q(str(exc)))
+            if self.command_log:
+                self.command_log.rejected(client, request.command, str(exc))
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
 
         if reason := self.policy.current().check(spec.command):
             audit.warning("rejected client=%s reason=%s command=%s", client, _q(f"tools policy: {reason}"),
                           _q(spec.command))
+            if self.command_log:
+                self.command_log.rejected(client, spec.command, f"tools policy: {reason}")
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, f"blocked by the server's tools policy: {reason}")
 
         if self._active >= self.settings.max_concurrent:
             audit.warning("rejected client=%s reason=%s", client, _q("too many concurrent commands"))
+            if self.command_log:
+                self.command_log.rejected(client, spec.command, "too many concurrent commands")
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 f"server is already running {self._active} commands (max {self.settings.max_concurrent})",
@@ -180,6 +192,9 @@ class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
             execution_id, client, _q(spec.cwd or os.getcwd()), spec.timeout or 0,
             _q(",".join(sorted(spec.env))), _q(spec.command),
         )
+        if self.command_log:
+            self.command_log.start(execution_id, client, spec.cwd or os.getcwd(), spec.command,
+                                   spec.timeout or 0, spec.env)
         started = time.monotonic()
         outcome = "cancelled"
         exit_code: int | str = "-"
@@ -187,7 +202,9 @@ class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
         try:
             async with contextlib.aclosing(self.executor.run(spec, execution_id)) as events:
                 async for ev in events:
-                    if isinstance(ev, Finished):
+                    if isinstance(ev, Output) and self.command_log:
+                        self.command_log.output(execution_id, ev.stream.value, ev.data)
+                    elif isinstance(ev, Finished):
                         outcome, exit_code = ev.status.value, ev.exit_code
                         if ev.status is Status.ERROR:
                             exit_code = "-"
@@ -195,10 +212,13 @@ class RemoteExecutorService(pb_grpc.RemoteExecutorServicer):
                     yield event_to_proto(ev, self.hostname)
         finally:
             self._active -= 1
+            duration = time.monotonic() - started
             audit.info(
                 "end id=%s client=%s status=%s exit_code=%s duration=%.3fs",
-                execution_id, client, outcome, exit_code, time.monotonic() - started,
+                execution_id, client, outcome, exit_code, duration,
             )
+            if self.command_log:
+                self.command_log.end(execution_id, outcome, exit_code, duration)
 
     async def GetServerInfo(self, request, context):
         policy = self.policy.current()
@@ -215,10 +235,13 @@ class RemoteExecServer:
         self.settings = settings
         self.executor = Executor(shell=settings.shell or default_shell(), kill_grace=settings.kill_grace)
         self.policy = PolicyProvider(settings.tools_file, required=settings.tools_required)
+        self.command_log = CommandLog(
+            settings.command_log, int(settings.command_log_max_mb * 1024 * 1024), settings.command_log_keep,
+        ) if settings.command_log else None
         interceptors = [TokenAuthInterceptor(settings.token)] if settings.token else []
         self._server = grpc.aio.server(interceptors=interceptors, options=SERVER_OPTIONS)
         pb_grpc.add_RemoteExecutorServicer_to_server(
-            RemoteExecutorService(settings, self.executor, self.policy), self._server
+            RemoteExecutorService(settings, self.executor, self.policy, self.command_log), self._server
         )
         self.bound_port: int | None = None
 
@@ -239,6 +262,11 @@ class RemoteExecServer:
             bool(s.token), self.executor.shell,
         )
         log.info("tools policy: %s", self.policy.current().describe())
+        if self.command_log:
+            log.info("command log: %s (rotate at %g MB, keep %s)", self.command_log.path,
+                     self.settings.command_log_max_mb, self.settings.command_log_keep or "all")
+        else:
+            log.info("command log: disabled")
         return port
 
     async def stop(self, grace: float = 5.0) -> None:
@@ -246,6 +274,8 @@ class RemoteExecServer:
         await self._server.stop(grace)
         await self.executor.wait_cleanups(timeout=self.settings.kill_grace + 2)
         self.executor.kill_all()
+        if self.command_log:
+            self.command_log.close()
 
     async def wait_for_termination(self) -> None:
         await self._server.wait_for_termination()

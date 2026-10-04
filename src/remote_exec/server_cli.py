@@ -10,6 +10,7 @@ import signal
 import sys
 
 from . import __version__
+from .cmdlog import DEFAULT_COMMAND_LOG, DEFAULT_MAX_MB, CommandLog
 from .config import DEFAULT_HOST, DEFAULT_PORT, ConfigError, load_server_config, split_host_port, validate_port
 from .policy import DEFAULT_TOOLS_FILE, PolicyError, PolicyProvider
 from .security import DEFAULT_TOKEN_FILE, SecurityError, generate_token_file, is_loopback_host, read_secret_file
@@ -34,6 +35,10 @@ DEFAULTS = {
     "allow_root": False,
     "listen": None,
     "tools": None,
+    "command_log": DEFAULT_COMMAND_LOG,
+    "command_log_max_mb": DEFAULT_MAX_MB,
+    "command_log_keep": 0,
+    "no_command_log": False,
 }
 
 
@@ -79,6 +84,14 @@ def build_parser() -> argparse.ArgumentParser:
     lg = p.add_argument_group("logging")
     lg.add_argument("--log-level", help="DEBUG, INFO, WARNING, ERROR (default: INFO)")
     lg.add_argument("--log-file", metavar="FILE", help="also append logs to FILE (default: stderr only)")
+    lg.add_argument("--command-log", metavar="FILE",
+                    help=f"file recording every command and its output (default: ./{DEFAULT_COMMAND_LOG} "
+                    "in the directory the server is started from)")
+    lg.add_argument("--command-log-max-mb", type=float, metavar="MB",
+                    help=f"start a new command log file when it would exceed MB (default: {DEFAULT_MAX_MB:g})")
+    lg.add_argument("--command-log-keep", type=int, metavar="N",
+                    help="keep only the N most recent rotated command logs (default: 0 = keep all)")
+    lg.add_argument("--no-command-log", action="store_true", default=None, help="do not write a command log")
     p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -102,6 +115,14 @@ def resolve_settings(args: argparse.Namespace) -> tuple[ServerSettings, dict]:
         raise ConfigError("--tls-cert and --tls-key must be given together")
     if opts["tls_client_ca"] and not opts["tls_cert"]:
         raise ConfigError("--tls-client-ca (mTLS) requires --tls-cert/--tls-key")
+    if float(opts["command_log_max_mb"]) < 0.001:
+        raise ConfigError("command_log_max_mb must be at least 0.001 (1 KiB)")
+    if int(opts["command_log_keep"]) < 0:
+        raise ConfigError("command_log_keep must be >= 0")
+    command_log = None
+    if not opts["no_command_log"] and opts["command_log"] not in (None, False, ""):
+        # Relative paths are relative to the directory the server is started from.
+        command_log = os.path.abspath(os.path.expanduser(str(opts["command_log"])))
 
     token = read_secret_file(opts["token_file"]) if opts["token_file"] else None
     settings = ServerSettings(
@@ -110,6 +131,8 @@ def resolve_settings(args: argparse.Namespace) -> tuple[ServerSettings, dict]:
         kill_grace=float(opts["kill_grace"]), token=token,
         tls_cert=opts["tls_cert"], tls_key=opts["tls_key"], tls_client_ca=opts["tls_client_ca"],
         tools_file=opts["tools"], tools_required=bool(opts["tools"]),
+        command_log=command_log, command_log_max_mb=float(opts["command_log_max_mb"]),
+        command_log_keep=int(opts["command_log_keep"]),
     )
     return settings, opts
 
@@ -179,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         setup_logging(opts["log_level"], opts["log_file"])
         check_safety(settings, opts)
         PolicyProvider(settings.tools_file, required=settings.tools_required)  # validate tools.yaml early
+        if settings.command_log:  # fail now, not on the first command, if the log is not writable
+            CommandLog(settings.command_log, int(settings.command_log_max_mb * 1024 * 1024)).close()
     except (ConfigError, SecurityError, PolicyError, OSError) as exc:
         print(f"remote-exec-server: error: {exc}", file=sys.stderr)
         return 2

@@ -18,8 +18,10 @@ CLIENT = str(BIN / "remote-exec-client")
 
 
 def start_server(*args: str) -> subprocess.Popen:
+    # Run in the isolated HOME so the default ./remote-exec-commands.log stays out of the repo.
     proc = subprocess.Popen(
         [SERVER, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+        cwd=os.environ["HOME"],
     )
     return proc
 
