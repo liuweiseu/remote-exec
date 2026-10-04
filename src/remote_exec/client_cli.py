@@ -18,6 +18,7 @@ from .client import (
 )
 from .config import ClientConfig, ConfigError, default_client_config_path, load_client_config
 from .security import SecurityError
+from .skill import DEFAULT_SKILL_DIR, SKILL_NAME, SkillExistsError, install_skill
 
 PROG = "remote-exec-client"
 
@@ -37,6 +38,7 @@ examples:
   {PROG} fpga01 -e FPGA_PART=xcvu37p -e BUILD_MODE=release ./build.sh
   {PROG} gpu01 --timeout 60 -- nvidia-smi -L
   {PROG} --list
+  {PROG} --install-skill        # teach Claude Code to use this tool
 """
 
 
@@ -61,8 +63,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="print execution summary to stderr")
     p.add_argument("--list", action="store_true", help="list configured servers and exit")
     p.add_argument("--ping", action="store_true", help="check that SERVER is reachable and show its info")
+    p.add_argument("--install-skill", nargs="?", const=str(DEFAULT_SKILL_DIR), metavar="DIR",
+                   help=f"install the '{SKILL_NAME}' Claude Code skill as DIR/{SKILL_NAME}.md "
+                   f"(default DIR: {DEFAULT_SKILL_DIR}) and exit")
+    p.add_argument("--force", action="store_true", help="with --install-skill: overwrite an existing, modified skill")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
+
+
+def do_install_skill(directory: str, force: bool) -> int:
+    try:
+        path, status = install_skill(directory, force=force)
+    except SkillExistsError as exc:
+        err(f"error: {exc}")
+        return 1
+    except OSError as exc:
+        err(f"error: cannot install skill: {exc}")
+        return 1
+    if status == "unchanged":
+        print(f"skill already up to date: {path}")
+    else:
+        print(f"skill {status}: {path}")
+        print(f"Claude Code can now use it automatically, or invoke it with /{SKILL_NAME}")
+    return 0
 
 
 def parse_env(items: list[str]) -> dict[str, str]:
@@ -144,6 +167,8 @@ async def _main_async(args, endpoint, command: str | None, env: dict[str, str]) 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_intermixed_args(argv)
+    if args.install_skill:
+        return do_install_skill(args.install_skill, args.force)
 
     try:
         config = load_client_config(args.config)

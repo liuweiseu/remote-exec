@@ -18,7 +18,7 @@ echo $?    # exit code of the remote vivado run
 
 The remote execution layer is **agent-independent**. It contains no AI/LLM logic
 and works the same for agents, shell scripts, CI and humans. Claude Code is just
-one consumer (see the [skill example](examples/claude-skill/remote-exec/SKILL.md)).
+one consumer (`remote-exec-client --install-skill`, see [Claude Code integration](#14-claude-code-integration)).
 
 ## 2. Architecture
 
@@ -53,8 +53,10 @@ src/remote_exec/
     client_cli.py       remote-exec-client entry point
     config.py           client/server config loading
     security.py         token auth interceptor, TLS credentials
+    skill.py            --install-skill implementation
+    claude_skill.md     Claude Code skill text (installed by --install-skill)
 tests/                  unit + localhost integration tests
-examples/               config.yaml, server.yaml, systemd unit, Claude skill
+examples/               config.yaml, server.yaml, systemd unit
 scripts/gen_proto.sh    protobuf code generation
 ```
 
@@ -302,20 +304,39 @@ authenticate can run any command as the service user.
 
 ## 14. Claude Code integration
 
-[examples/claude-skill/remote-exec/SKILL.md](examples/claude-skill/remote-exec/SKILL.md)
-is a ready-to-adapt skill. It tells Claude which servers exist and what they
-provide, when to go remote, how to pass `--cwd`/`--env`/`--timeout`, how to
-read the exit codes, and to avoid destructive commands.
+On the machine where Claude Code runs:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -r examples/claude-skill/remote-exec ~/.claude/skills/
-# edit the server table in ~/.claude/skills/remote-exec/SKILL.md
+remote-exec-client --install-skill          # -> ~/.claude/commands/remote-exec.md
+remote-exec-client --install-skill DIR      # -> DIR/remote-exec.md
+remote-exec-client --install-skill --force  # overwrite a locally modified copy
 ```
 
-Claude then decides on its own to call, e.g.,
-`remote-exec-client fpga01 --cwd /home/user/project --timeout 7200 "vivado -mode batch -source build.tcl"`,
-and reads the streamed output and the exit code.
+This installs the `remote-exec` skill (a Claude Code custom command; source:
+[src/remote_exec/claude_skill.md](src/remote_exec/claude_skill.md)). It covers
+`remote-exec-client` only, since the servers are assumed to be running. It tells
+Claude to:
+
+- discover servers and their tools with `remote-exec-client --list`, and check
+  them with `--ping`
+- decide when remote execution is appropriate
+- pass `--cwd` / `-e` / `--timeout`, interpret exit codes, and handle long jobs
+  and large output
+- avoid destructive commands
+
+Describe each server's tools in the client config's `description` field, because
+that is what `--list` shows Claude:
+
+```yaml
+servers:
+  fpga01: {host: fpga01.example.local, description: "FPGA development: Vivado, Questa"}
+  gpu01:  {host: gpu01.example.local,  description: "GPU computation: CUDA, nvidia-smi, Python"}
+```
+
+Claude then uses the skill on its own (or when you type `/remote-exec <task>`) and calls, e.g.,
+`remote-exec-client fpga01 --cwd /home/user/project --timeout 7200 "vivado -mode batch -source build.tcl"`.
+It reads the streamed output and the exit code. Re-run `--install-skill` after
+upgrading the package to pick up a newer version of the skill.
 
 ## 15. Testing
 
@@ -338,6 +359,7 @@ uv run pytest            # ~20 s
   already in use.
 - `tests/test_config.py`: config parsing, default/custom ports, server option
   precedence, safety checks.
+- `tests/test_skill.py`: `--install-skill` (default/custom dir, update, `--force`).
 
 ## 16. Future extensions
 

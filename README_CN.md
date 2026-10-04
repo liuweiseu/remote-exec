@@ -17,7 +17,7 @@ echo $?    # 远程 vivado 运行的退出码
 ```
 
 远程执行层是**与 Agent 无关**的。它不包含任何 AI/LLM 逻辑，对 Agent、Shell 脚本、CI 和人类用户
-的行为完全一致。Claude Code 只是其中一个使用者（参见 [Skill 示例](examples/claude-skill/remote-exec/SKILL.md)）。
+的行为完全一致。Claude Code 只是其中一个使用者（`remote-exec-client --install-skill`，参见 [Claude Code 集成](#14-claude-code-集成)）。
 
 ## 2. 架构
 
@@ -51,8 +51,10 @@ src/remote_exec/
     client_cli.py       remote-exec-client 入口
     config.py           client/server 配置加载
     security.py         token 认证拦截器、TLS 凭据
+    skill.py            --install-skill 的实现
+    claude_skill.md     Claude Code skill 文本（由 --install-skill 安装）
 tests/                  单元测试 + localhost 集成测试
-examples/               config.yaml、server.yaml、systemd unit、Claude skill
+examples/               config.yaml、server.yaml、systemd unit
 scripts/gen_proto.sh    protobuf 代码生成
 ```
 
@@ -273,19 +275,34 @@ journalctl -u remote-exec-server -f
 
 ## 14. Claude Code 集成
 
-[examples/claude-skill/remote-exec/SKILL.md](examples/claude-skill/remote-exec/SKILL.md)
-是一个可直接改用的 skill。它告诉 Claude 有哪些 server、各自提供什么、何时应该远程执行、如何传递
-`--cwd`/`--env`/`--timeout`、如何理解退出码，以及要避免破坏性命令。
+在运行 Claude Code 的机器上执行：
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -r examples/claude-skill/remote-exec ~/.claude/skills/
-# 编辑 ~/.claude/skills/remote-exec/SKILL.md 中的 server 表格
+remote-exec-client --install-skill          # -> ~/.claude/commands/remote-exec.md
+remote-exec-client --install-skill DIR      # -> DIR/remote-exec.md
+remote-exec-client --install-skill --force  # 覆盖本地已修改过的副本
 ```
 
-之后 Claude 会自主决定调用，例如
+该命令会安装 `remote-exec` skill（Claude Code 自定义命令；源文件：
+[src/remote_exec/claude_skill.md](src/remote_exec/claude_skill.md)）。它只涉及
+`remote-exec-client`，因为假定各 server 已在运行。它告诉 Claude：
+
+- 用 `remote-exec-client --list` 发现 server 及其工具，用 `--ping` 检查连通性
+- 判断何时适合远程执行
+- 传递 `--cwd` / `-e` / `--timeout`，理解退出码，处理长时间任务和大量输出
+- 避免破坏性命令
+
+请在 client 配置的 `description` 字段中写明每台 server 提供的工具，因为 `--list` 正是把它展示给 Claude：
+
+```yaml
+servers:
+  fpga01: {host: fpga01.example.local, description: "FPGA development: Vivado, Questa"}
+  gpu01:  {host: gpu01.example.local,  description: "GPU computation: CUDA, nvidia-smi, Python"}
+```
+
+之后 Claude 会自主使用该 skill（或在你输入 `/remote-exec <任务>` 时使用），调用例如
 `remote-exec-client fpga01 --cwd /home/user/project --timeout 7200 "vivado -mode batch -source build.tcl"`，
-并读取流式输出和退出码。
+并读取流式输出和退出码。升级 package 后重新运行 `--install-skill` 即可获得新版 skill。
 
 ## 15. 测试
 
@@ -303,6 +320,7 @@ uv run pytest            # 约 20 秒
   **自定义端口 50052**、退出码、超时 → 124、不可用 → 255、client 被 SIGINT/SIGTERM/SIGKILL
   时远程进程树被终止、server 关闭，以及拒绝未认证的公网绑定。如果固定端口已被占用，相应测试会被跳过。
 - `tests/test_config.py`：配置解析、默认/自定义端口、server 选项优先级、安全检查。
+- `tests/test_skill.py`：`--install-skill`（默认/自定义目录、更新、`--force`）。
 
 ## 16. 未来扩展
 
