@@ -100,7 +100,12 @@ uv tool install --force .                           # 升级 / 重新安装
 ```bash
 remote-exec-server --port 50051          # 在远程服务器上
 remote-exec-client fpga01 "hostname"     # 在本地机器上
+remote-exec-client --install-skill       # 可选：让 Claude Code 使用该工具（见 §14）
 ```
+
+`fpga01` 是在 client 配置文件（`~/.config/remote-exec/config.yaml`）中定义的 server 名称，
+由配置文件将它映射到具体的 host 和 port，详见 [§9 Client 配置](#9-client-配置)。
+`remote-exec-client --list` 可以列出所有已配置的名称及其地址。
 
 ## 5. 开发环境
 

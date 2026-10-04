@@ -108,7 +108,13 @@ This puts `remote-exec-server` and `remote-exec-client` in `~/.local/bin`.
 ```bash
 remote-exec-server --port 50051          # on the remote server
 remote-exec-client fpga01 "hostname"     # on the local machine
+remote-exec-client --install-skill       # optional: let Claude Code use it (see §14)
 ```
+
+`fpga01` is a server name defined in the client config file
+(`~/.config/remote-exec/config.yaml`), which maps it to a host and port; see
+[§9 Client configuration](#9-client-configuration). `remote-exec-client --list`
+shows all configured names and their addresses.
 
 ## 5. Development environment
 
