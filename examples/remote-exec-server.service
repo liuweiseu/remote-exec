@@ -5,8 +5,8 @@
 #
 #   install -m 644 remote-exec-server.service /etc/systemd/system/
 #   install -d -o builder -m 700 /etc/remote-exec
-#   install -o builder -m 600 /dev/null /etc/remote-exec/token
-#   openssl rand -hex 32 > /etc/remote-exec/token      # copy to clients
+#   sudo -u builder /home/builder/.local/bin/remote-exec-server \
+#       --generate-token /etc/remote-exec/token          # copy to clients
 #   systemctl daemon-reload
 #   systemctl enable --now remote-exec-server
 #   journalctl -u remote-exec-server -f                 # logs + audit trail

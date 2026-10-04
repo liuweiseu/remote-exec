@@ -11,7 +11,7 @@ import sys
 
 from . import __version__
 from .config import DEFAULT_HOST, DEFAULT_PORT, ConfigError, load_server_config, split_host_port, validate_port
-from .security import SecurityError, is_loopback_host, read_secret_file
+from .security import DEFAULT_TOKEN_FILE, SecurityError, generate_token_file, is_loopback_host, read_secret_file
 from .server import ServerSettings, serve
 
 log = logging.getLogger("remote_exec.server")
@@ -58,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="allow listening on a non-loopback address without any authentication (NOT recommended)")
     sec.add_argument("--allow-root", action="store_true", default=None,
                      help="allow running as root (NOT recommended)")
+    sec.add_argument("--generate-token", nargs="?", const=str(DEFAULT_TOKEN_FILE), metavar="FILE",
+                     help=f"create a new random token file (mode 600) and exit; default FILE: {DEFAULT_TOKEN_FILE}")
+    sec.add_argument("--force", action="store_true", default=None,
+                     help="with --generate-token: replace an existing token file")
 
     ex = p.add_argument_group("execution")
     ex.add_argument("--shell", help="shell used as '<shell> -c <command>' (default: /bin/bash, else /bin/sh)")
@@ -144,8 +148,24 @@ async def _run(settings: ServerSettings) -> None:
     await serve(settings, stop)
 
 
+def do_generate_token(path: str, force: bool) -> int:
+    try:
+        target = generate_token_file(path, force=force)
+    except SecurityError as exc:
+        print(f"remote-exec-server: error: {exc}", file=sys.stderr)
+        return 1
+    print(f"token written to {target} (mode 600)")
+    print("next steps:")
+    print(f"  server: remote-exec-server --host 0.0.0.0 --token-file {target}")
+    print("  client: copy this file to the client machine (e.g. ~/.config/remote-exec/token, chmod 600)")
+    print("          and set 'token_file:' in the client config")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.generate_token:
+        return do_generate_token(args.generate_token, bool(args.force))
     try:
         # Logging first so config warnings (e.g. token file permissions) are shown.
         setup_logging(args.log_level or "INFO", args.log_file)

@@ -147,6 +147,7 @@ If you upgrade `grpcio-tools`, keep the `grpcio`/`protobuf` lower bounds in
 
 ```bash
 remote-exec-server                       # 127.0.0.1:50051, local only
+remote-exec-server --generate-token      # create ~/.config/remote-exec/token (mode 600)
 remote-exec-server --host 0.0.0.0 --port 50051 --token-file ~/.config/remote-exec/token
 remote-exec-server --config /etc/remote-exec/server.yaml
 ```
@@ -267,8 +268,7 @@ See [examples/remote-exec-server.service](examples/remote-exec-server.service).
 sudo -u builder uv tool install /path/to/remote-exec
 sudo install -m 644 examples/remote-exec-server.service /etc/systemd/system/
 sudo install -d -o builder -m 700 /etc/remote-exec
-sudo sh -c 'openssl rand -hex 32 > /etc/remote-exec/token'
-sudo chown builder /etc/remote-exec/token && sudo chmod 600 /etc/remote-exec/token
+sudo -u builder /home/builder/.local/bin/remote-exec-server --generate-token /etc/remote-exec/token
 # edit User=/ExecStart= paths in the unit
 sudo systemctl daemon-reload
 sudo systemctl enable remote-exec-server
@@ -291,7 +291,13 @@ authenticate can run any command as the service user.
 - **Authenticate even on private networks**:
   - *Bearer token*: `--token-file` on the server; `token_file` in the client
     config. The token is compared in constant time. Keep the file at mode 600
-    (the server warns otherwise). Without TLS the token travels in clear text,
+    (the server warns otherwise).
+    `remote-exec-server --generate-token [FILE]` creates a random 256-bit token.
+    The default FILE is `~/.config/remote-exec/token`. The file gets mode 600
+    and its directory 700, and the token itself is never printed. An existing
+    file is only replaced with `--force`, because that locks out clients still
+    using the old token. Copy the file to each client (e.g. `scp`, then
+    `chmod 600`) and point `token_file` at it. Without TLS the token travels in clear text,
     which is fine inside WireGuard/Tailscale but not on a shared LAN.
   - *TLS*: `--tls-cert/--tls-key` on the server; `tls: true` + `ca_cert` on the
     client.
@@ -366,6 +372,8 @@ uv run pytest            # ~20 s
 - `tests/test_config.py`: config parsing, default/custom ports, server option
   precedence, safety checks.
 - `tests/test_skill.py`: `--install-skill` (default/custom dir, update, `--force`).
+- `tests/test_token.py`: `--generate-token` (permissions, randomness, `--force`,
+  generated token authenticates).
 
 ## 16. Future extensions
 

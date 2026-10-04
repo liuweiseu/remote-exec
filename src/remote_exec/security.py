@@ -14,7 +14,9 @@ import hmac
 import ipaddress
 import logging
 import os
+import secrets
 import stat
+import tempfile
 from pathlib import Path
 
 import grpc
@@ -24,10 +26,43 @@ audit = logging.getLogger("remote_exec.audit")
 
 AUTH_METADATA_KEY = "authorization"
 BEARER_PREFIX = "Bearer "
+DEFAULT_TOKEN_FILE = Path("~/.config/remote-exec/token")
+TOKEN_BYTES = 32
 
 
 class SecurityError(Exception):
     pass
+
+
+def generate_token_file(path: str | os.PathLike | None = None, force: bool = False) -> Path:
+    """Write a new random token (hex, 256 bit) to ``path`` with mode 600.
+
+    The parent directory is created with mode 700 if missing. An existing file
+    is only replaced when ``force`` is true, because replacing it locks out
+    every client that still has the old token.
+    """
+    target = Path(path or DEFAULT_TOKEN_FILE).expanduser()
+    if target.exists() and not force:
+        raise SecurityError(
+            f"token file {target} already exists; use --force to replace it "
+            "(clients using the old token will be rejected)"
+        )
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Write to a private temp file and rename it into place, so the token is
+        # never readable by others and an existing file is replaced atomically.
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(secrets.token_hex(TOKEN_BYTES) + "\n")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, target)
+        except BaseException:
+            os.unlink(tmp)
+            raise
+    except OSError as exc:
+        raise SecurityError(f"cannot write token file {target}: {exc.strerror or exc}") from exc
+    return target
 
 
 def read_secret_file(path: str | os.PathLike, what: str = "token") -> str:

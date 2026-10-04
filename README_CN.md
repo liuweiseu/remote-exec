@@ -136,6 +136,7 @@ proto 文件放在 `proto/remote_exec/v1/`（而不是 `proto/remote_exec.proto`
 
 ```bash
 remote-exec-server                       # 127.0.0.1:50051，仅本机可访问
+remote-exec-server --generate-token      # 创建 ~/.config/remote-exec/token（权限 600）
 remote-exec-server --host 0.0.0.0 --port 50051 --token-file ~/.config/remote-exec/token
 remote-exec-server --config /etc/remote-exec/server.yaml
 ```
@@ -246,8 +247,7 @@ remote-exec-client gpu01 --timeout 60 -- ls -la /data   # 未加引号的多个�
 sudo -u builder uv tool install /path/to/remote-exec
 sudo install -m 644 examples/remote-exec-server.service /etc/systemd/system/
 sudo install -d -o builder -m 700 /etc/remote-exec
-sudo sh -c 'openssl rand -hex 32 > /etc/remote-exec/token'
-sudo chown builder /etc/remote-exec/token && sudo chmod 600 /etc/remote-exec/token
+sudo -u builder /home/builder/.local/bin/remote-exec-server --generate-token /etc/remote-exec/token
 # 修改 unit 文件中的 User= / ExecStart= 路径
 sudo systemctl daemon-reload
 sudo systemctl enable remote-exec-server
@@ -266,7 +266,11 @@ journalctl -u remote-exec-server -f
   而不是 `0.0.0.0`。绝不要把端口暴露到公网；用防火墙加以限制。
 - **即使在私有网络中也要启用认证**：
   - *Bearer token*：server 端使用 `--token-file`；client 配置中使用 `token_file`。token 采用
-    常量时间比较。请将文件权限设为 600（否则 server 会发出警告）。未启用 TLS 时 token 以明文
+    常量时间比较。请将文件权限设为 600（否则 server 会发出警告）。
+    `remote-exec-server --generate-token [FILE]` 可生成 256 位随机 token，FILE 默认为
+    `~/.config/remote-exec/token`。生成的文件权限为 600、所在目录为 700，token 本身不会打印出来。
+    已有文件只有加 `--force` 才会被替换，因为替换后仍使用旧 token 的 client 都会被拒绝。
+    把该文件复制到每台 client（例如 `scp` 后 `chmod 600`），并让 `token_file` 指向它。未启用 TLS 时 token 以明文
     传输，在 WireGuard/Tailscale 内部没问题，但不适用于共享的局域网。
   - *TLS*：server 端使用 `--tls-cert/--tls-key`；client 端使用 `tls: true` + `ca_cert`。
   - *mTLS*（局域网推荐）：server 端再加上 `--tls-client-ca`，client 端配置
@@ -326,6 +330,7 @@ uv run pytest            # 约 20 秒
   时远程进程树被终止、server 关闭，以及拒绝未认证的公网绑定。如果固定端口已被占用，相应测试会被跳过。
 - `tests/test_config.py`：配置解析、默认/自定义端口、server 选项优先级、安全检查。
 - `tests/test_skill.py`：`--install-skill`（默认/自定义目录、更新、`--force`）。
+- `tests/test_token.py`：`--generate-token`（文件权限、随机性、`--force`、生成的 token 可通过认证）。
 
 ## 16. 未来扩展
 
