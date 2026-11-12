@@ -271,7 +271,7 @@ wheels = [
 ]
 
 [[package]]
-name = "remote-exec"
+name = "remote-exec-grpc"
 version = "0.2.1"
 source = { editable = "." }
 dependencies = [

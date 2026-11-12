@@ -100,12 +100,16 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## 4. Installing the tools (`uv tool install`)
 
 ```bash
+uv tool install remote-exec-grpc                    # from PyPI
 uv tool install .                                   # from a checkout
 uv tool install git+https://example.com/remote-exec.git   # from a git repo
 uv tool install --force .                           # upgrade / reinstall
 ```
 
 This puts `remote-exec-server` and `remote-exec-client` in `~/.local/bin`.
+The PyPI distribution is named `remote-exec-grpc` (`remote-exec` is taken by an
+unrelated project); the import package and command names stay `remote_exec` /
+`remote-exec-*`.
 
 ```bash
 remote-exec-server --port 50051          # on the remote server

@@ -1,5 +1,5 @@
 [project]
-name = "remote-exec"
+name = "remote-exec-grpc"
 version = "0.2.1"
 description = "Lightweight gRPC remote command execution with real-time stdout/stderr streaming"
 readme = "README.md"
