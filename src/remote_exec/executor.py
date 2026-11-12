@@ -122,6 +122,35 @@ async def terminate_process_group(pgid: int, grace: float = DEFAULT_KILL_GRACE) 
     _signal_process_group(pgid, signal.SIGKILL)
 
 
+class _ExitNotifyingProtocol(asyncio.subprocess.SubprocessStreamProtocol):
+    """Stream protocol that resolves ``exited`` as soon as the process exits.
+
+    Before Python 3.13, ``Process.wait()`` only returns once the process has
+    exited *and* all its pipes are closed. A background child that inherited
+    stdout (``sleep 300 &``) would therefore block ``wait()`` until it exits,
+    so we could never notice the main process exiting and clean up its group.
+    """
+
+    def __init__(self, limit: int, loop: asyncio.AbstractEventLoop):
+        super().__init__(limit=limit, loop=loop)
+        self.exited: asyncio.Future[int] = loop.create_future()
+
+    def process_exited(self) -> None:
+        # Read the code first: the base class may drop _transport (3.13+).
+        returncode = self._transport.get_returncode()
+        super().process_exited()
+        if not self.exited.done():
+            self.exited.set_result(returncode)
+
+
+async def _spawn(program: str, *args: str, **kwds) -> tuple[asyncio.subprocess.Process, asyncio.Future[int]]:
+    """Like ``asyncio.create_subprocess_exec`` but also returns an exit future."""
+    loop = asyncio.get_running_loop()
+    protocol_factory = lambda: _ExitNotifyingProtocol(limit=2**16, loop=loop)  # noqa: E731
+    transport, protocol = await loop.subprocess_exec(protocol_factory, program, *args, **kwds)
+    return asyncio.subprocess.Process(transport, protocol, loop), protocol.exited
+
+
 class Executor:
     """Runs commands; tracks background cleanup tasks so shutdown can await them."""
 
@@ -151,7 +180,7 @@ class Executor:
         start_time = utcnow()
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc, exited = await _spawn(
                 self.shell,
                 "-c",
                 spec.command,
@@ -187,7 +216,8 @@ class Executor:
                     pass
 
         async def wait_and_reap() -> int:
-            rc = await proc.wait()
+            # Not proc.wait(): before 3.13 it also waits for the pipes to close.
+            rc = await exited
             # Kill whatever the command left behind in its process group.
             await terminate_process_group(pgid, self.kill_grace)
             return rc
